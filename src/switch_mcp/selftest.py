@@ -4,7 +4,11 @@ It talks to the server over MCP exactly as an agent does, so it checks the
 whole chain: Bluetooth link, inputs reaching the console, HDMI capture and the
 direct reconnection. Run it with the console on the "Test Input Devices >
 Test Controller Buttons" screen (*Tester les périphériques d'entrée >
-Tester les boutons*), where a held button lights up on screen.
+Tester les boutons*). That screen appends an icon for every press and keeps
+it after the release, so a press counts as received when the picture changes.
+A button that stayed down could not be pressed again and add a new icon, so
+a run of presses that all show up also proves every release reached the
+console. Holding a button ends that test screen, hence brief presses only.
 
     switch-mcp selftest            # the server must already be running
 """
@@ -32,11 +36,11 @@ DEFAULT_BUTTONS = ("A", "B", "X", "Y", "UP", "DOWN", "LEFT", "RIGHT", "ZL", "ZR"
 DEFAULT_PRESSES = 20
 CONNECT_TIMEOUT_S = 180.0
 RECONNECT_TIMEOUT_S = 30.0
-# A held button must change at least this share of the (downscaled) picture,
-# and the picture must come back once it is released.
+# A press must change at least this share of the (downscaled) picture.
 CHANGED_PIXEL_DELTA = 30
 CHANGED_SHARE = 0.0005
-_INPUT_DELAY_S = 0.25
+_PRESS_MS = 100
+_INPUT_DELAY_S = 0.3
 _POLL_S = 1.0
 # Lets the console notice the disconnection before reconnecting.
 _RECONNECT_PAUSE_S = 2.0
@@ -141,18 +145,11 @@ async def run_selftest(
         failures = []
         for index in range(presses):
             button = buttons[index % len(buttons)]
-            idle = await client.frame()
-            await client.call("switch_hold", {"buttons": [button], "seconds": 3})
+            before = await client.frame()
+            await client.call("switch_press", {"buttons": [button], "duration_ms": _PRESS_MS})
             await anyio.sleep(_INPUT_DELAY_S)
-            held = await client.frame()
-            await client.call("switch_release", {"buttons": [button]})
-            await anyio.sleep(_INPUT_DELAY_S)
-            released = await client.frame()
-            seen, back = changed_share(idle, held), changed_share(idle, released)
-            if seen < CHANGED_SHARE:
+            if changed_share(before, await client.frame()) < CHANGED_SHARE:
                 failures.append(f"{button} n°{index + 1} pas vu à l'écran")
-            elif back >= CHANGED_SHARE:
-                failures.append(f"{button} n°{index + 1} pas relâché à l'écran")
         report.add(
             "Appuis vérifiés par capture", not failures,
             f"{presses - len(failures)}/{presses}" + (f" ({'; '.join(failures)})" if failures else ""), out,
