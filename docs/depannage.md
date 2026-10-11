@@ -73,6 +73,20 @@ l'ouverture. Si les couleurs se faussent pendant une capture déjà ouverte,
 laisse l'agent sans capture 30 s (la carte est alors relâchée) ou redémarre le
 serveur : `switch-mcp stop && switch-mcp start`.
 
+## Image décalée ou enroulée
+
+**Signe.** L'image est coupée et décalée, une partie du bas apparaît en haut
+(ou un côté passe de l'autre), et cela persiste d'une capture à l'autre. Vu
+une fois après 11 minutes de captures continues.
+
+**Cause.** Le flux du pilote `sc0710` perd son alignement ; il ne le retrouve
+qu'à la réouverture de la carte.
+
+**Remède.** Le serveur rouvre la carte toutes les 5 minutes de capture
+continue, ce qui borne la durée du défaut. Pour le corriger tout de suite,
+laisse l'agent sans capture 30 s (la carte est relâchée) ou redémarre le
+serveur : `switch-mcp stop && switch-mcp start`.
+
 ## La carte de capture a disparu après une mise à jour du noyau
 
 **Signe.** `/dev/video0` n'existe plus ; `doctor` signale la carte absente.

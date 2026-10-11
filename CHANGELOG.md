@@ -31,7 +31,8 @@ normale. Client visé : Claude Code.
 - Flux de rapports continu pour des appuis brefs exacts sur la Switch 2.
 - Relâchement automatique de toute entrée maintenue à échéance.
 - Capture HDMI ouverte à la demande, relâchée après inactivité, rouverte après
-  une perte de signal, avec contournement du défaut de couleurs du pilote `sc0710`.
+  une perte de signal et toutes les 5 minutes de capture continue (image
+  décalée du pilote `sc0710`), avec contournement de son défaut de couleurs.
 - Rediffusion `/preview` pour regarder pendant que l'agent joue.
 
 ### Recette et tests

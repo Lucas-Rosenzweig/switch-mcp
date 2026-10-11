@@ -93,3 +93,18 @@ def test_error_when_device_cannot_open(monkeypatch):
 
     with pytest.raises(CaptureError, match="Cannot open fake"):
         Capture("fake", opener=opener).screenshot()
+
+
+def test_stream_is_reopened_periodically(monkeypatch):
+    monkeypatch.setattr("switch_mcp.capture._REOPEN_EVERY_S", 0.05)
+    sources = []
+
+    def opener(device):
+        sources.append(Source())
+        return sources[-1]
+
+    capture = Capture("fake", opener=opener)
+    capture.screenshot()
+    time.sleep(0.15)
+    capture.screenshot()
+    assert len(sources) >= 2 and sources[0].released

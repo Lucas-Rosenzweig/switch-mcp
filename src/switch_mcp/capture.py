@@ -25,6 +25,10 @@ PIXEL_FORMAT = "BGR3"
 FIRST_FRAME_TIMEOUT_S = 5.0
 _REOPEN_AFTER_FAILURES = 30
 _REOPEN_DELAY_S = 1.0
+# The sc0710 stream was seen to slip once after ~11 minutes of continuous use
+# (picture wrapped around, offset) and to stay so until the device was
+# reopened. Reopening it periodically bounds how long such a picture lasts.
+_REOPEN_EVERY_S = 300.0
 
 
 class CaptureError(RuntimeError):
@@ -101,6 +105,7 @@ class Capture:
     def _reader(self) -> None:
         source = None
         failures = 0
+        opened_at = 0.0
         try:
             while True:
                 with self._cond:
@@ -110,9 +115,13 @@ class Capture:
                         self._running = False
                         self._frame = None
                         return
+                if source is not None and time.monotonic() - opened_at > _REOPEN_EVERY_S:
+                    source.release()
+                    source = None
                 if source is None:
                     try:
                         source = self._opener(self._device)
+                        opened_at = time.monotonic()
                         failures = 0
                     except CaptureError as exc:
                         self._set_error(str(exc))
