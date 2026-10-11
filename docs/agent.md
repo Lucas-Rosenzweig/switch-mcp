@@ -1,23 +1,102 @@
 # Brancher un agent
 
-Claude Code est le seul client visé pour la v0.1. Tout autre client MCP qui
-parle HTTP « streamable » devrait fonctionner de la même façon.
+Le serveur ne dépend d'aucun agent en particulier : c'est un service local qui
+parle MCP en HTTP « streamable » sur `http://127.0.0.1:8765/mcp`, sans
+authentification (il n'écoute que sur cette machine). `switch-mcp start` le
+lance, `switch-mcp stop` l'arrête, et tout client MCP peut s'y brancher tant
+qu'il tourne. Plusieurs clients peuvent être connectés en même temps ; ils
+partagent alors la même manette.
 
-## Déclarer le serveur
+`switch-mcp config --url` affiche l'adresse en vigueur si `host` ou `port` ont
+été changés.
 
-`install.sh` le fait déjà. À la main :
+## Claude Code
+
+`install.sh` déclare le serveur. À la main :
 
 ```fish
 claude mcp add --scope user --transport http switch http://127.0.0.1:8765/mcp
 ```
 
-Le serveur doit tourner (`switch-mcp start`). Dans Claude Code, `/mcp` doit
-montrer `switch` connecté avec dix outils.
+Dans Claude Code, `/mcp` doit montrer `switch` connecté avec dix outils.
 
 Pour démarrer, le plus simple est le prompt fourni par le serveur :
-`/mcp__switch__start_session` dans Claude Code. Il fait vérifier l'état,
-connecter la manette et décrire l'écran avant toute action ; son argument
-facultatif `goal` donne l'objectif de la session.
+`/mcp__switch__start_session`. Il fait vérifier l'état, connecter la manette et
+décrire l'écran avant toute action ; son argument facultatif `goal` donne
+l'objectif de la session.
+
+## Un autre client MCP
+
+Sans Claude Code sur la machine, `install.sh` installe tout le reste et affiche
+l'adresse à déclarer. Le client doit pouvoir afficher des images, puisque
+`switch_screenshot` renvoie l'écran en JPEG.
+
+**Client qui accepte un serveur HTTP distant** (Cursor, VS Code, Codex, Gemini
+CLI, etc.). Le nom du champ varie d'un client à l'autre (`url`, `httpUrl`,
+`serverUrl`) ; la forme la plus courante est :
+
+```json
+{
+  "mcpServers": {
+    "switch": { "type": "http", "url": "http://127.0.0.1:8765/mcp" }
+  }
+}
+```
+
+**Client qui ne lance que des serveurs stdio** (Claude Desktop par son fichier
+de configuration, par exemple). Un pont relaie vers le service ; il ne faut pas
+lancer `switch-mcp serve` en stdio, qui n'aurait pas les droits Bluetooth :
+
+```json
+{
+  "mcpServers": {
+    "switch": { "command": "npx", "args": ["-y", "mcp-remote", "http://127.0.0.1:8765/mcp"] }
+  }
+}
+```
+
+**Son propre programme.** Avec le SDK Python `mcp` :
+
+```python
+import asyncio
+
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+
+async def main():
+    async with streamablehttp_client("http://127.0.0.1:8765/mcp") as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            print((await session.call_tool("switch_status", {})).content[0].text)
+            await session.call_tool("switch_press", {"buttons": ["A"]})
+
+
+asyncio.run(main())
+```
+
+Les consignes de jeu arrivent dans le champ `instructions` de la réponse à
+`initialize` ; un client qui ne les transmet pas à son modèle gagne à les
+recopier dans son prompt système. Le prompt `start_session` est disponible par
+`prompts/get`.
+
+## Sans agent du tout
+
+Rien de ce qui suit ne passe par un modèle :
+
+```fish
+switch-mcp start      # lance le service
+switch-mcp doctor     # contrôle l'installation
+switch-mcp selftest   # joue la recette sur la console, comme le ferait un agent
+switch-mcp stop       # rend le Bluetooth au PC
+```
+
+Pour appeler les outils à la main, l'inspecteur MCP se branche comme un client
+(transport « Streamable HTTP », adresse ci-dessus) :
+
+```fish
+npx @modelcontextprotocol/inspector
+```
 
 ## Ce que l'agent sait sans qu'on le lui dise
 
