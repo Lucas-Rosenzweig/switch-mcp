@@ -35,8 +35,8 @@ une seule fois. Il installe l'environnement Python (`uv sync --extra bluetooth`)
 la commande `switch-mcp` dans `~/.local/bin`, le service systemd
 `switch-mcp.service` (non lancé au démarrage du PC), une règle polkit qui permet
 de le démarrer et l'arrêter sans mot de passe, un fichier de configuration
-`~/.config/switch-mcp/config.toml` et le serveur MCP `switch` dans Claude Code
-(niveau utilisateur).
+`~/.config/switch-mcp/config.toml` et, si Claude Code est présent, le serveur MCP
+`switch` dans Claude Code (niveau utilisateur).
 
 Vérifie ensuite que tout est en place :
 
@@ -73,8 +73,10 @@ switch-mcp stop      # arrête le serveur et rétablit le Bluetooth normal
 switch-mcp status    # état du service, mode Bluetooth, adresse MCP
 ```
 
-Console allumée et dockée, il suffit ensuite de demander à Claude Code de jouer.
-L'agent lit l'état, se reconnecte, regarde l'écran et agit ; le détail est dans
+Console allumée et dockée, il suffit ensuite de demander à l'agent de jouer :
+il lit l'état, se reconnecte, regarde l'écran et agit. Claude Code est déclaré
+par `install.sh` ; tout autre client MCP se branche sur la même adresse, et la
+commande `switch-mcp` fonctionne sans aucun agent. Le détail est dans
 [docs/agent.md](docs/agent.md).
 
 Pendant une session, `bluetoothd` tourne sans ses plugins pour libérer les ports

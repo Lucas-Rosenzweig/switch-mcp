@@ -6,7 +6,8 @@ versions selon [SemVer](https://semver.org/lang/fr/).
 ## [0.1.0] - non publiée
 
 Première version utilisable par un agent sans intervention humaine en session
-normale. Client visé : Claude Code.
+normale. Client visé : Claude Code ; les autres clients MCP et l'usage sans
+agent sont décrits dans `docs/agent.md`.
 
 ### Interface pour l'agent
 
