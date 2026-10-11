@@ -153,3 +153,4 @@ def read_class(index: int = 0) -> int | None:
         return None
     finally:
         sock.close()
+

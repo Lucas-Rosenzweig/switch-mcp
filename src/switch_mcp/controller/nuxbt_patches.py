@@ -6,6 +6,7 @@ here, in one place, so the workers inherit it.
 from __future__ import annotations
 
 import logging
+import socket
 import time
 from collections.abc import Callable, Iterable
 
@@ -22,6 +23,11 @@ _HANGUP_POLL_S = 0.1
 # waits for a new pairing, which needs someone at the console.
 _RECONNECT_ATTEMPTS = 4
 _RECONNECT_RETRY_S = 3.0
+# Asked of the kernel for the report stream; it rounds up to its minimum,
+# which holds a handful of reports.
+_SEND_BUFFER = 1
+_QUEUE_LOG_S = 60.0
+_DROPPED_WARNING = 0.1
 # Subcommands arrive in bursts when the link comes up and rarely afterwards.
 # The cap keeps a console that repeats one of them from flooding the log.
 _LOGGED_PER_SUBCOMMAND = 20
@@ -47,6 +53,56 @@ _SUBCOMMAND_NAMES = {
     0x48: "enable vibration",
     0x50: "get regulated voltage",
 }
+
+
+class ReportSocket:
+    """The interrupt channel, with a send queue too short to fall behind.
+
+    Whenever the radio is busy elsewhere (the PC trying to reach another
+    device, for one) the reports pile up in the kernel. Measured on the
+    console: the link fell from 132 to 16 reports a second,
+    the default buffer filled with several seconds of stale states, and from
+    then on new reports were dropped, short presses with them. Every report
+    carries the whole state, so only the latest matters: a queue of a few
+    reports loses nothing and keeps the console a few reports behind at most.
+    """
+
+    def __init__(self, sock) -> None:
+        self._sock = sock
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, _SEND_BUFFER)
+        self._sent = self._dropped = 0
+        self._next_log = time.monotonic() + _QUEUE_LOG_S
+
+    def __getattr__(self, name):
+        return getattr(self._sock, name)
+
+    def fileno(self) -> int:
+        return self._sock.fileno()
+
+    def sendall(self, data) -> None:
+        try:
+            self._sock.sendall(data)
+            self._sent += 1
+        except BlockingIOError:
+            self._dropped += 1
+            raise
+        finally:
+            now = time.monotonic()
+            if now >= self._next_log:
+                # A healthy link drops next to nothing. On the test machine
+                # a script reconnecting another gamepad kept the radio busy
+                # 40 seconds a minute and seven reports in eight were dropped.
+                total = self._sent + self._dropped
+                if total and self._dropped / total > _DROPPED_WARNING:
+                    log.warning(
+                        "%d of %d reports could not be sent in the last %.0f s: the radio is busy with something "
+                        "else (another Bluetooth device being connected or searched for?), inputs will be late",
+                        self._dropped, total, _QUEUE_LOG_S,
+                    )
+                else:
+                    log.info("Reports in the last %.0f s: %d sent, %d dropped", _QUEUE_LOG_S, self._sent, self._dropped)
+                self._sent = self._dropped = 0
+                self._next_log = now + _QUEUE_LOG_S
 
 
 def describe_command(data: bytes | None, handled: Iterable[int]) -> tuple[int, str] | None:
@@ -167,9 +223,17 @@ def apply() -> None:
                 time.sleep(_RECONNECT_RETRY_S)
             else:
                 log.info("Reconnected to %s with adapter class %s", reconnect_address, format_class(before))
-                return sockets
+                return ReportSocket(sockets[0]), sockets[1]
 
     ControllerServer.reconnect = reconnect
+
+    original_connect = ControllerServer.connect
+
+    def connect(server):
+        itr, ctrl = original_connect(server)
+        return ReportSocket(itr), ctrl
+
+    ControllerServer.connect = connect
 
     def connection_reset_watchdog(server):
         watch_hangups(

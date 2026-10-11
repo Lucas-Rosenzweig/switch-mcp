@@ -14,7 +14,7 @@ import subprocess
 import threading
 import time
 
-from . import nuxbt_patches
+from . import linkmode, nuxbt_patches
 from .adapter_class import claim_gamepad_class, set_kernel_class
 from .base import PadState
 from .linkkeys import LinkKeyKeeper
@@ -127,6 +127,10 @@ class NuxbtBackend:
             self._keys.start()
         except OSError:
             log.warning("Link keys will not be kept; every session will need a new pairing", exc_info=True)
+        try:
+            linkmode.start()
+        except OSError:
+            log.warning("Link mode changes will not be logged", exc_info=True)
 
     # -- adapter alias -----------------------------------------------------
 
@@ -302,4 +306,9 @@ class NuxbtBackend:
             self._restore_alias()
             self._restore_class()
             self._nx._on_exit()
+            # NUXBT leaves its pairing agent running; it would outlive us.
+            agent = getattr(self._nx, "agent_process", None)
+            if agent is not None and agent.is_alive():
+                agent.terminate()
+                agent.join(timeout=2)
             self._nx = None

@@ -107,6 +107,44 @@ def test_patched_protocol_still_answers_and_logs(caplog):
     assert caplog.text.count("Console subcommand 0x02 device info") == nuxbt_patches._LOGGED_PER_SUBCOMMAND
 
 
+class FakeSocket:
+    def __init__(self, full=False):
+        self.full, self.sent, self.options = full, [], []
+
+    def setsockopt(self, *option):
+        self.options.append(option)
+
+    def sendall(self, data):
+        if self.full:
+            raise BlockingIOError
+        self.sent.append(data)
+
+    def recv(self, size):
+        return b"reply"
+
+
+def test_report_socket_keeps_a_short_queue_and_counts_drops(caplog, monkeypatch):
+    import socket
+
+    inner = FakeSocket()
+    reports = nuxbt_patches.ReportSocket(inner)
+    assert inner.options == [(socket.SOL_SOCKET, socket.SO_SNDBUF, nuxbt_patches._SEND_BUFFER)]
+    reports.sendall(b"a")
+    assert inner.sent == [b"a"] and reports.recv(50) == b"reply"
+
+    inner.full = True
+    monkeypatch.setattr(nuxbt_patches, "_QUEUE_LOG_S", 0)
+    reports._next_log = 0
+    with caplog.at_level(logging.INFO, logger=nuxbt_patches.__name__):
+        try:
+            reports.sendall(b"b")
+        except BlockingIOError:
+            pass  # NUXBT skips the cycle on this error
+        else:
+            raise AssertionError("a full queue must still be reported to NUXBT")
+    assert "1 of 2 reports could not be sent" in caplog.text
+
+
 def test_a_refused_reconnection_is_tried_again(monkeypatch):
     import pytest
 
@@ -127,7 +165,7 @@ def test_a_refused_reconnection_is_tried_again(monkeypatch):
     class Server:
         bt = Adapter()
         # Stands for the two sockets.connect() NUXBT performs.
-        outcomes = [OSError("refused"), OSError("refused"), ("itr", "ctrl")]
+        outcomes = [OSError("refused"), OSError("refused"), (FakeSocket(), "ctrl")]
 
     def original(server, address):
         outcome = server.outcomes.pop(0)
@@ -141,7 +179,8 @@ def test_a_refused_reconnection_is_tried_again(monkeypatch):
     real = cell.cell_contents
     cell.cell_contents = original
     try:
-        assert ControllerServer.reconnect(Server(), "AA:BB:CC:DD:EE:FF") == ("itr", "ctrl")
+        itr, ctrl = ControllerServer.reconnect(Server(), "AA:BB:CC:DD:EE:FF")
+        assert isinstance(itr, nuxbt_patches.ReportSocket) and ctrl == "ctrl"
         assert Adapter.classes == ["0x002508"] * 3  # announced again before each attempt
 
         Server.outcomes = [OSError("refused")] * nuxbt_patches._RECONNECT_ATTEMPTS

@@ -66,3 +66,4 @@ def test_a_busy_kernel_is_asked_again(monkeypatch):
     monkeypatch.setattr(adapter_class.time, "sleep", lambda seconds: None)
     adapter_class.set_kernel_class(0x01, 0x04)
     assert statuses == []
+
