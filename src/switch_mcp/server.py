@@ -231,7 +231,7 @@ def main(argv: list[str] | None = None) -> None:
     _log_to_file()
 
     config = Config.load()
-    backend = make_backend(config.backend)
+    backend = make_backend(config.backend, config.settle_s, config.switch_address)
     if hasattr(backend, "start"):
         try:
             backend.start()

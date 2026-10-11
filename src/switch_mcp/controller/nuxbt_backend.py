@@ -35,9 +35,9 @@ _ADAPTER_IFACE = "org.bluez.Adapter1"
 # stops reporting, so neither do we: an extra key makes every packet
 # "non-idle" to NUXBT, and the stream starts as soon as the link is up.
 _KEEP_STREAMING = "SWITCH_MCP_KEEP_STREAMING"
-# Inputs are refused for this long after the stream starts, while the console
+# Default time inputs are refused after the stream starts, while the console
 # switches from its slow post-connection polling to the normal rate.
-_SETTLE_S = 3.0
+DEFAULT_SETTLE_S = 3.0
 _WATCH_INTERVAL_S = 0.2
 
 
@@ -66,13 +66,13 @@ def check_setup() -> None:
     missing = missing_capabilities()
     if missing:
         raise SetupError(
-            f"Missing capabilities {missing}. Start the server with deploy/run-with-caps "
-            "or install deploy/switch-mcp.service."
+            f"Missing capabilities {missing}. Start the server with `switch-mcp start`; "
+            "`switch-mcp doctor` checks the installation."
         )
     if not bluetoothd_plugins_disabled():
         raise SetupError(
             "bluetoothd still has its plugins enabled, so the HID ports are taken. "
-            "Run: deploy/bluetooth-session on"
+            "Start the server with `switch-mcp start`, or run `switch-mcp bt on` when launching it by hand."
         )
 
 
@@ -92,7 +92,11 @@ def build_packet(packet: dict, state: PadState) -> dict:
 
 
 class NuxbtBackend:
-    def __init__(self) -> None:
+    def __init__(self, settle_s: float = DEFAULT_SETTLE_S, switch_address: str | None = None) -> None:
+        """`switch_address` limits direct reconnection to that console;
+        without it, every console whose link key was kept is tried."""
+        self._settle_s = settle_s
+        self._switch_address = switch_address.upper() if switch_address else None
         self._lock = threading.Lock()
         self._nx = None
         self._index: int | None = None
@@ -195,6 +199,16 @@ class NuxbtBackend:
             log.warning("Could not load stored link keys; a new pairing will be needed", exc_info=True)
             return []
 
+    def _reconnection_targets(self, known: list[str]) -> list[str]:
+        """Consoles to reconnect to directly, among those whose key is loaded."""
+        if self._switch_address is None:
+            return known
+        if self._switch_address in known:
+            return [self._switch_address]
+        # Without its key the console would refuse us; go straight to pairing.
+        log.info("No link key kept for the configured console %s; waiting for a pairing", self._switch_address)
+        return []
+
     def connect(self) -> None:
         import nuxbt
 
@@ -211,9 +225,9 @@ class NuxbtBackend:
             self._claim_gamepad_class()
             # With a console whose link key we kept, NUXBT reconnects directly
             # and falls back to pairing (Change Grip/Order menu) if that fails.
-            known = self._load_known_consoles()
+            targets = self._reconnection_targets(self._load_known_consoles())
             self._index = self._nx.create_controller(
-                nuxbt.PRO_CONTROLLER, reconnect_address=known or None
+                nuxbt.PRO_CONTROLLER, reconnect_address=targets or None
             )
             self._streaming_since = None
             threading.Thread(
@@ -247,7 +261,7 @@ class NuxbtBackend:
             state = self._controller_state()
             name = state.get("state")
             if name == "connected" and (
-                self._streaming_since is None or time.monotonic() - self._streaming_since < _SETTLE_S
+                self._streaming_since is None or time.monotonic() - self._streaming_since < self._settle_s
             ):
                 name = "settling"
             return {
