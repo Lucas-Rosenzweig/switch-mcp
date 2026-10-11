@@ -14,6 +14,8 @@ import subprocess
 import threading
 import time
 
+from . import nuxbt_patches
+from .adapter_class import claim_gamepad_class, set_kernel_class
 from .base import PadState
 from .linkkeys import LinkKeyKeeper
 
@@ -24,7 +26,6 @@ _REQUIRED_CAPS = {"CAP_NET_BIND_SERVICE": 10, "CAP_NET_ADMIN": 12, "CAP_NET_RAW"
 _BUTTON_KEYS = {"UP": "DPAD_UP", "DOWN": "DPAD_DOWN", "LEFT": "DPAD_LEFT", "RIGHT": "DPAD_RIGHT"}
 _STICK_KEYS = {"left": "L_STICK", "right": "R_STICK"}
 _ADAPTER_IFACE = "org.bluez.Adapter1"
-_GAMEPAD_CLASS = "0x002508"
 # NUXBT stops streaming reports when its input packet equals its idle packet.
 # The Switch 2 copes badly with a stream that stops and starts: the release
 # that ends a press is seen up to a second late, and the first press after a
@@ -97,6 +98,7 @@ class NuxbtBackend:
         self._index: int | None = None
         self._adapter_path: str | None = None
         self._original_alias: str | None = None
+        self._original_class: tuple[int, int] | None = None
         self._setup_error: str | None = None
         self._keys = LinkKeyKeeper()
         self._streaming_since: float | None = None
@@ -117,28 +119,8 @@ class NuxbtBackend:
             self._setup_error = str(exc)
             raise SetupError(self._setup_error) from exc
         self._setup_error = None
-        # NUXBT sends a raw HCI Reset when a controller process exits. The
-        # kernel and bluetoothd are not told, so the adapter loses the setup
-        # they gave it and the next pairing fails until bluetoothd restarts.
         # Patched before NUXBT forks its workers so they inherit it.
-        from nuxbt.bluez import BlueZ
-
-        BlueZ.reset_adapter = lambda self: None
-        # NUXBT only announces itself as a gamepad when pairing. The Switch 2
-        # hangs up on a reconnecting device of any other class, so announce
-        # it before reconnecting too.
-        from nuxbt.controller.server import ControllerServer
-
-        if not getattr(ControllerServer.reconnect, "_sets_class", False):
-            original_reconnect = ControllerServer.reconnect
-
-            def reconnect(server, reconnect_address):
-                server.bt.set_class(_GAMEPAD_CLASS)
-                time.sleep(0.1)
-                return original_reconnect(server, reconnect_address)
-
-            reconnect._sets_class = True
-            ControllerServer.reconnect = reconnect
+        nuxbt_patches.apply()
         # SWITCH_MCP_NUXBT_DEBUG=1 logs every message exchanged with the console.
         self._nx = nuxbt.Nuxbt(debug=os.environ.get("SWITCH_MCP_NUXBT_DEBUG") == "1")
         try:
@@ -179,12 +161,33 @@ class NuxbtBackend:
 
     # -- Backend -----------------------------------------------------------
 
+    def _adapter_index(self) -> int:
+        try:
+            return int((self._adapter_path or "hci0").rsplit("hci", 1)[1])
+        except ValueError:
+            return 0
+
+    def _claim_gamepad_class(self) -> None:
+        """Keep the kernel from announcing the adapter as a computer while
+        NUXBT announces it as a gamepad (see adapter_class)."""
+        previous = claim_gamepad_class(self._adapter_index())
+        if previous is not None and self._original_class is None:
+            self._original_class = previous
+
+    def _restore_class(self) -> None:
+        if self._original_class is None:
+            return
+        try:
+            set_kernel_class(*self._original_class, self._adapter_index())
+        except OSError:
+            log.warning("Could not restore the adapter class", exc_info=True)
+        self._original_class = None
+
     def _load_known_consoles(self) -> list[str]:
         """Hand stored link keys to the kernel; returns the consoles they belong to."""
         try:
-            index = int((self._adapter_path or "hci0").rsplit("hci", 1)[1])
-            return self._keys.load_into_kernel(index)
-        except (OSError, ValueError):
+            return self._keys.load_into_kernel(self._adapter_index())
+        except OSError:
             log.warning("Could not load stored link keys; a new pairing will be needed", exc_info=True)
             return []
 
@@ -201,6 +204,7 @@ class NuxbtBackend:
                 self._remove_controller()
                 time.sleep(0.5)
             self._remember_alias()
+            self._claim_gamepad_class()
             # With a console whose link key we kept, NUXBT reconnects directly
             # and falls back to pairing (Change Grip/Order menu) if that fails.
             known = self._load_known_consoles()
@@ -279,6 +283,14 @@ class NuxbtBackend:
                         connected = False
                 elif not connected:
                     self._streaming_since = None
+                    if was_connected:
+                        # NUXBT reconnects by itself and would replay the
+                        # inputs held when the link dropped.
+                        log.warning("Link to the console lost; inputs released")
+                        try:
+                            self._send(PadState())
+                        except Exception:
+                            log.warning("Could not clear the inputs after the link dropped", exc_info=True)
                 was_connected = connected
 
     def close(self) -> None:
@@ -288,5 +300,6 @@ class NuxbtBackend:
             if self._index is not None:
                 self._remove_controller()
             self._restore_alias()
+            self._restore_class()
             self._nx._on_exit()
             self._nx = None
