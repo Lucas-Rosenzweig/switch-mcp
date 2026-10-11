@@ -90,6 +90,14 @@ class Capture:
         with self._cond:
             return self._running
 
+    def status(self) -> dict:
+        """What an agent needs to know about the picture, without opening the device."""
+        with self._cond:
+            fresh = self._frame is not None and time.monotonic() - self._frame_time < 1.0
+            # Unknown while the device is closed: only a screenshot opens it.
+            signal = fresh if self._running or self._error else None
+            return {"capture_open": self._running, "hdmi_signal": signal, "capture_error": self._error}
+
     def _reader(self) -> None:
         source = None
         failures = 0
@@ -157,15 +165,38 @@ class Capture:
                 raise CaptureError(self._error or "No frame from the capture card (is the Switch docked and on?)")
             return self._frame
 
-    def screenshot(self, quality: str = "normal") -> bytes:
+    def screenshot(self, quality: str = "normal", crop: tuple[float, float, float, float] | None = None) -> bytes:
+        """JPEG of a fresh frame. `crop` is (x, y, width, height) as fractions of the
+        picture; the cropped area is then scaled like a full frame, which enlarges it."""
         if quality not in QUALITIES:
             raise ValueError(f"quality must be one of {sorted(QUALITIES)}")
+        box = _crop_box(crop) if crop is not None else None
         frame = self.frame()
+        if box is not None:
+            h, w = frame.shape[:2]
+            x0, y0, x1, y1 = (round(box[0] * w), round(box[1] * h), round(box[2] * w), round(box[3] * h))
+            frame = frame[y0:max(y1, y0 + 1), x0:max(x1, x0 + 1)]
         width, jpeg_quality = QUALITIES[quality]
-        if width is not None and frame.shape[1] > width:
+        if box is not None and width is not None:
+            # Enlarge a small region so details are legible, up to the quality's width.
+            height = round(frame.shape[0] * width / frame.shape[1])
+            frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_CUBIC)
+        elif width is not None and frame.shape[1] > width:
             height = round(frame.shape[0] * width / frame.shape[1])
             frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
         ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
         if not ok:
             raise CaptureError("JPEG encoding failed")
         return encoded.tobytes()
+
+
+def _crop_box(crop) -> tuple[float, float, float, float]:
+    """Validate (x, y, width, height) fractions and return (x0, y0, x1, y1)."""
+    if not isinstance(crop, (list, tuple)) or len(crop) != 4:
+        raise ValueError("crop must be [x, y, width, height], fractions of the picture")
+    x, y, w, h = (float(v) for v in crop)
+    if not (0 <= x < 1 and 0 <= y < 1 and 0 < w <= 1 and 0 < h <= 1):
+        raise ValueError("crop values must be fractions: x and y in [0, 1), width and height in (0, 1]")
+    if x + w > 1.0001 or y + h > 1.0001:
+        raise ValueError("crop must stay inside the picture: x + width <= 1 and y + height <= 1")
+    return x, y, min(x + w, 1.0), min(y + h, 1.0)
