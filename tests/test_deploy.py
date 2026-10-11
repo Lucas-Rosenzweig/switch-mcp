@@ -27,3 +27,10 @@ def test_polkit_rule_is_limited_to_one_unit_and_user():
     assert 'action.lookup("unit") == "switch-mcp.service"' in rule
     assert 'subject.user == "@USER@"' in rule
     assert "enable" not in rule
+
+
+def test_restoring_bluetooth_does_not_wait_for_bluetoothd():
+    # ExecStopPost runs while bluetooth.service's stop waits for this unit.
+    helper = (DEPLOY / "bluetooth-mode").read_text()
+    off = helper.split("\noff)")[1].split(";;")[0]
+    assert "restart_bluetoothd --no-block" in off

@@ -81,8 +81,15 @@ def check_service() -> list[Result]:
         results.append(Result(FAIL, "service", f"unit lacks {', '.join(missing)}", "rerun ./install.sh"))
     else:
         state = subprocess.run(["systemctl", "is-active", cli.SERVICE], capture_output=True, text=True, check=False)
-        results.append(Result(OK, "service", f"installed, {state.stdout.strip() or 'unknown'}"))
-    if not POLKIT_RULE.exists():
+        state = state.stdout.strip() or "unknown"
+        if state == "failed":
+            results.append(Result(WARN, "service", "installed, failed last time", "journalctl -u switch-mcp -e"))
+        else:
+            results.append(Result(OK, "service", f"installed, {state}"))
+    if not os.access(POLKIT_RULE.parent, os.R_OK | os.X_OK):
+        # 0750 root:polkitd on Arch: the rule cannot be seen from here.
+        results.append(Result(INFO, "polkit rule", "not readable by this user; switch-mcp start asks for a password if it is missing"))
+    elif not POLKIT_RULE.exists():
         results.append(Result(WARN, "polkit rule", f"{POLKIT_RULE} missing; start/stop will ask for a password", "rerun ./install.sh"))
     else:
         results.append(Result(OK, "polkit rule", "start/stop without password"))

@@ -18,7 +18,7 @@ override=/run/systemd/system/bluetooth.service.d/switch-mcp.conf
 
 restart_bluetoothd() {
     systemctl daemon-reload
-    systemctl restart bluetooth.service
+    systemctl restart "$@" bluetooth.service
 }
 
 case "${1:-status}" in
@@ -48,7 +48,10 @@ off)
         exit 0
     fi
     rm -f "$override"
-    restart_bluetoothd
+    # Run from switch-mcp.service's ExecStopPost, which bluetooth.service's
+    # stop waits for (the unit is ordered After= it): waiting for the restart
+    # here would deadlock until the stop timeout.
+    restart_bluetoothd --no-block
     echo "Bluetooth is back to normal."
     ;;
 status)
