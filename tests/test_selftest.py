@@ -1,4 +1,6 @@
 """The hardware acceptance test, run against a simulated console."""
+import time
+
 import anyio
 import numpy as np
 import pytest
@@ -13,16 +15,22 @@ from switch_mcp.server import build_server
 
 
 class Screen:
-    """Button test screen: a held button lights up a square of its own."""
+    """Button test screen of the Switch 2: every press appends an icon, which stays
+    after the release; the row shows the last ten presses."""
 
     def __init__(self, backend):
         self.backend = backend
 
     def read(self):
+        time.sleep(0.005)
+        presses, down = [], frozenset()
+        for _, state in list(self.backend.history):
+            presses += sorted(state.buttons - down)
+            down = state.buttons
         frame = np.zeros((720, 1280, 3), dtype=np.uint8)
-        for button in self.backend.current.buttons:
-            x = 100 * (sorted(selftest.DEFAULT_BUTTONS).index(button) if button in selftest.DEFAULT_BUTTONS else 0)
-            frame[100:200, x:x + 80] = 255
+        for slot, button in enumerate(presses[-10:]):
+            shade = 60 + 15 * sorted(selftest.DEFAULT_BUTTONS).index(button)
+            frame[300:380, 100 * slot:100 * slot + 80] = shade
         return True, frame
 
     def release(self):
@@ -44,9 +52,8 @@ def run(backend, **kwargs):
 
     async def main():
         async with create_connected_server_and_client_session(server) as session:
-            return await selftest.run_selftest(
-                session, presses=4, connect_timeout_s=1, reconnect_timeout_s=1, out=lines.append, **kwargs
-            )
+            options = {"presses": 4, "connect_timeout_s": 1, "reconnect_timeout_s": 1, **kwargs}
+            return await selftest.run_selftest(session, out=lines.append, **options)
 
     report = anyio.run(main)
     pad.close()
@@ -75,6 +82,25 @@ def test_reports_presses_the_console_missed():
     report, lines = run(DeafConsole())
     assert not report.passed
     assert "3/4" in lines[1] and "B n°2 pas vu" in lines[1]
+
+
+class StuckConsole(FakeBackend):
+    """The release of A never reaches the console."""
+
+    def apply(self, state):
+        stuck = any("A" in s.buttons for _, s in self.history)
+        super().apply(type(state)(buttons=state.buttons | ({"A"} if stuck else set()), left=state.left, right=state.right))
+
+
+def test_reports_a_button_that_stays_down():
+    report, lines = run(StuckConsole(), buttons=("A",))
+    assert not report.passed
+    assert "1/4" in lines[1] and "A n°2 pas vu" in lines[1]
+
+
+def test_more_presses_than_the_row_holds():
+    report, lines = run(FakeBackend(), presses=25)
+    assert report.passed, lines
 
 
 class ForgetfulConsole(FakeBackend):

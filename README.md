@@ -105,9 +105,11 @@ switch-mcp selftest
 
 Serveur démarré, la recette se connecte comme un agent, puis te demande
 d'ouvrir **Paramètres > Manettes et accessoires > Tester les périphériques
-d'entrée > Tester les boutons**. Elle maintient alors 20 boutons un par un et
-vérifie sur la capture que chacun s'allume puis s'éteint, se déconnecte, et
-contrôle la reconnexion directe. Elle finit par « Recette réussie » ou par la
+d'entrée > Tester les boutons**. Elle fait alors 20 appuis brefs et vérifie
+sur la capture que chacun ajoute son icône à l'écran (une touche restée
+enfoncée ne pourrait pas en ajouter une nouvelle), se déconnecte, et contrôle
+la reconnexion directe. Ne maintiens aucune touche pendant ce temps : un
+maintien met fin à l'écran de test. Elle finit par « Recette réussie » ou par la
 liste de ce qui a échoué.
 
 ## Outils MCP
