@@ -72,4 +72,10 @@ def test_stream_starts_when_the_link_comes_up_and_inputs_wait_for_it(monkeypatch
     time.sleep(0.12)
     assert backend.status()["state"] == "connected"
 
+    # NUXBT reconnects by itself after a drop and would replay held inputs.
+    backend._nx.set_controller_input(0, build_packet(template(), PadState(buttons=frozenset({"A"}))))
+    backend._nx.state[0] = {"state": "reconnecting"}
+    time.sleep(0.05)
+    assert not backend._nx.packets[-1]["A"] and backend.status()["state"] == "reconnecting"
+
     backend._index = None  # the watcher stops with its controller
