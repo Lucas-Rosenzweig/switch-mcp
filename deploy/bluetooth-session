@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Switch bluetoothd in and out of "controller emulation" mode.
+#
+#   on      restart bluetoothd without its plugins, so the HID ports are free
+#   off     restore the normal bluetoothd
+#   status  show which mode is active
+#
+# While "on", other Bluetooth devices of this PC (headsets, gamepads) do not
+# work. The override lives in /run, so a reboot also restores normal mode.
+set -euo pipefail
+
+override=/run/systemd/system/bluetooth.service.d/switch-mcp.conf
+
+case "${1:-status}" in
+on)
+    exec_start=$(grep -m1 '^ExecStart=' "$(systemctl show -P FragmentPath bluetooth.service)")
+    sudo mkdir -p "$(dirname "$override")"
+    printf '[Service]\nExecStart=\n%s --compat --noplugin=*\n' "$exec_start" | sudo tee "$override" >/dev/null
+    sudo systemctl daemon-reload
+    sudo systemctl restart bluetooth.service
+    echo "Controller emulation mode is on."
+    ;;
+off)
+    sudo rm -f "$override"
+    sudo systemctl daemon-reload
+    sudo systemctl restart bluetooth.service
+    echo "Bluetooth is back to normal."
+    ;;
+status)
+    if [[ -f $override ]]; then echo "on"; else echo "off"; fi
+    ;;
+*)
+    echo "usage: $0 on|off|status" >&2
+    exit 2
+    ;;
+esac
