@@ -17,12 +17,16 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import anyio
-import cv2
-import numpy as np
 
-DEFAULT_URL = "http://127.0.0.1:8765/mcp"
+if TYPE_CHECKING:
+    import numpy as np
+
+# cv2 and numpy are imported where used, so that every other `switch-mcp`
+# command, which builds this module's parser, stays quick to start.
+
 # Buttons that do not leave the button test screen.
 DEFAULT_BUTTONS = ("A", "B", "X", "Y", "UP", "DOWN", "LEFT", "RIGHT", "ZL", "ZR")
 DEFAULT_PRESSES = 20
@@ -57,6 +61,9 @@ class Report:
 
 def changed_share(before: np.ndarray, after: np.ndarray) -> float:
     """Share of pixels that differ visibly between two frames."""
+    import cv2
+    import numpy as np
+
     small = [cv2.resize(cv2.cvtColor(f, cv2.COLOR_BGR2GRAY), (320, 180), interpolation=cv2.INTER_AREA)
              for f in (before, after)]
     return float(np.count_nonzero(cv2.absdiff(*small) > CHANGED_PIXEL_DELTA)) / small[0].size
@@ -80,6 +87,9 @@ class Client:
         return json.loads(content[0].text)
 
     async def frame(self) -> np.ndarray:
+        import cv2
+        import numpy as np
+
         content = await self.call("switch_screenshot", {"quality": "fast"})
         data = base64.b64decode(content[0].data)
         frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
@@ -171,7 +181,7 @@ async def run_selftest(
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--url", default=DEFAULT_URL, help=f"adresse MCP du serveur (défaut {DEFAULT_URL})")
+    parser.add_argument("--url", help="adresse MCP du serveur (défaut : celle de la configuration)")
     parser.add_argument("--presses", type=int, default=DEFAULT_PRESSES, help="nombre d'appuis vérifiés")
     parser.add_argument("--buttons", default=",".join(DEFAULT_BUTTONS), help="boutons à tester, séparés par des virgules")
     parser.add_argument("--yes", action="store_true", help="ne pas attendre Entrée avant les appuis")
@@ -182,6 +192,9 @@ def run(args: argparse.Namespace) -> int:
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
 
+    from .config import Config
+
+    url = args.url or Config.load().url
     buttons = tuple(b.strip().upper() for b in args.buttons.split(",") if b.strip())
 
     def confirm(message: str) -> None:
@@ -189,14 +202,14 @@ def run(args: argparse.Namespace) -> int:
             input(message + " ")
 
     async def main() -> Report:
-        async with streamable_http_client(args.url) as (read, write, _), ClientSession(read, write) as session:
+        async with streamable_http_client(url) as (read, write, _), ClientSession(read, write) as session:
             await session.initialize()
             return await run_selftest(session, presses=args.presses, buttons=buttons, confirm=confirm)
 
     try:
         report = anyio.run(main)
     except Exception as exc:
-        print(f"[ÉCHEC] Serveur injoignable à {args.url} : {exc}. Lance-le avec `switch-mcp start`.", file=sys.stderr)
+        print(f"[ÉCHEC] Serveur injoignable à {url} : {exc}. Lance-le avec `switch-mcp start`.", file=sys.stderr)
         return 2
     print("Recette réussie : livrable." if report.passed else "Recette échouée.")
     return 0 if report.passed else 1

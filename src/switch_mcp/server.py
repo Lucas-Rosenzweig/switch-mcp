@@ -198,7 +198,8 @@ def build_server(config: Config, pad: Pad, backend, capture: Capture) -> FastMCP
     async def switch_screenshot(quality: Quality = "normal", crop: Crop = None) -> Image:
         """A fresh image of the console screen, taken after this call (never a cached one).
 
-        quality: fast = 960 px wide, normal = 1280 px (default), detail = native resolution.
+        quality: fast = 960 px wide, normal = default (1280 px unless configured otherwise),
+        detail = native resolution.
         Use crop to read small text or icons instead of a full detail image.
         """
         return Image(data=await to_thread.run_sync(screenshot_now, quality, crop), format="jpeg")
@@ -380,7 +381,7 @@ def main(argv: list[str] | None = None) -> None:
             # Keep serving: screenshots still work and switch_status explains what is missing.
             log.warning("Controller backend not ready: %s", exc)
     pad = Pad(backend, config.default_hold_s, config.max_hold_s)
-    capture = Capture(config.video_device, config.capture_idle_s)
+    capture = Capture(config.video_device, config.capture_idle_s, normal_width=config.screenshot_width)
     if args.reload_file:
         threading.Thread(
             target=_exit_when_touched, args=(Path(args.reload_file), pad, backend), daemon=True, name="reload",

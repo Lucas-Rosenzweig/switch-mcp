@@ -108,3 +108,9 @@ def test_stream_is_reopened_periodically(monkeypatch):
     time.sleep(0.15)
     capture.screenshot()
     assert len(sources) >= 2 and sources[0].released
+
+
+def test_normal_width_is_configurable():
+    capture = Capture("fake", opener=lambda device: Source(), normal_width=640)
+    assert decode(capture.screenshot("normal")).shape == (360, 640, 3)
+    assert decode(capture.screenshot("fast")).shape == (540, 960, 3)

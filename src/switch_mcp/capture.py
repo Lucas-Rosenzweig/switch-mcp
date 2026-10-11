@@ -78,8 +78,11 @@ class Capture:
         device: str,
         idle_s: float = 30.0,
         opener: Callable[[str], FrameSource] = open_v4l2,
+        normal_width: int = QUALITIES["normal"][0],
     ) -> None:
         self._device = device
+        # "normal" is the default screenshot; its width is configurable.
+        self._qualities = {**QUALITIES, "normal": (normal_width, QUALITIES["normal"][1])}
         self._idle_s = idle_s
         self._opener = opener
         self._cond = threading.Condition()
@@ -177,15 +180,15 @@ class Capture:
     def screenshot(self, quality: str = "normal", crop: tuple[float, float, float, float] | None = None) -> bytes:
         """JPEG of a fresh frame. `crop` is (x, y, width, height) as fractions of the
         picture; the cropped area is then scaled like a full frame, which enlarges it."""
-        if quality not in QUALITIES:
-            raise ValueError(f"quality must be one of {sorted(QUALITIES)}")
+        if quality not in self._qualities:
+            raise ValueError(f"quality must be one of {sorted(self._qualities)}")
         box = _crop_box(crop) if crop is not None else None
         frame = self.frame()
         if box is not None:
             h, w = frame.shape[:2]
             x0, y0, x1, y1 = (round(box[0] * w), round(box[1] * h), round(box[2] * w), round(box[3] * h))
             frame = frame[y0:max(y1, y0 + 1), x0:max(x1, x0 + 1)]
-        width, jpeg_quality = QUALITIES[quality]
+        width, jpeg_quality = self._qualities[quality]
         if box is not None and width is not None:
             # Enlarge a small region so details are legible, up to the quality's width.
             height = round(frame.shape[0] * width / frame.shape[1])

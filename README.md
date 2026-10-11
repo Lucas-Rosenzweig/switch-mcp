@@ -139,7 +139,7 @@ Chaque réglage peut être surchargé par une variable d'environnement
 | `backend` | `nuxbt` | `nuxbt` ou `fake` |
 | `video_device` | `/dev/video0` | Périphérique de capture |
 | `capture_idle_s` | `30` | Inactivité avant de relâcher la capture |
-| `screenshot_width` | `1280` | Largeur d'une capture par défaut |
+| `screenshot_width` | `1280` | Largeur des captures `normal`, celles par défaut de `switch_screenshot` |
 | `default_hold_s` | `5` | Durée d'un maintien sans durée précisée |
 | `max_hold_s` | `30` | Durée maximale d'un maintien |
 | `settle_s` | `3` | Délai après connexion avant d'accepter les entrées |

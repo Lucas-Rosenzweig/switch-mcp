@@ -72,3 +72,10 @@ def test_start_reports_a_service_that_died(capsys, monkeypatch):
     monkeypatch.setattr(cli, "port_open", lambda host, port: False)
     assert cli.main(["start"]) == 1
     assert "journalctl" in capsys.readouterr().err
+
+
+def test_selftest_uses_the_configured_address(capsys, monkeypatch):
+    # Port 9 has no server: the self-test must try the configured one and say so.
+    monkeypatch.setenv("SWITCH_MCP_PORT", "9")
+    assert cli.main(["selftest", "--yes"]) == 2
+    assert "http://127.0.0.1:9/mcp" in capsys.readouterr().err
