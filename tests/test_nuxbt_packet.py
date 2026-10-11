@@ -57,8 +57,7 @@ def test_stream_starts_when_the_link_comes_up_and_inputs_wait_for_it(monkeypatch
     import time
 
     monkeypatch.setattr(nuxbt_backend, "_WATCH_INTERVAL_S", 0.01)
-    monkeypatch.setattr(nuxbt_backend, "_SETTLE_S", 0.1)
-    backend = NuxbtBackend()
+    backend = NuxbtBackend(settle_s=0.1)
     backend._nx, backend._index = StubNuxbt(), 0
     threading.Thread(target=backend._watch_link, args=(0,), daemon=True).start()
     time.sleep(0.05)
@@ -79,3 +78,20 @@ def test_stream_starts_when_the_link_comes_up_and_inputs_wait_for_it(monkeypatch
     assert not backend._nx.packets[-1]["A"] and backend.status()["state"] == "reconnecting"
 
     backend._index = None  # the watcher stops with its controller
+
+
+def test_configured_console_limits_direct_reconnection():
+    known = ["98:E2:55:00:11:22", "98:E2:55:33:44:55"]
+    assert NuxbtBackend()._reconnection_targets(known) == known
+    assert NuxbtBackend(switch_address="98:e2:55:33:44:55")._reconnection_targets(known) == ["98:E2:55:33:44:55"]
+    # No key for it: reconnecting would be refused, so pair instead.
+    assert NuxbtBackend(switch_address="98:E2:55:66:77:88")._reconnection_targets(known) == []
+
+
+def test_backend_factory_passes_the_configuration():
+    from switch_mcp.controller import make_backend
+
+    backend = make_backend("nuxbt", settle_s=1.5, switch_address="98:E2:55:00:11:22")
+    assert (backend._settle_s, backend._switch_address) == (1.5, "98:E2:55:00:11:22")
+    assert make_backend("nuxbt")._settle_s == nuxbt_backend.DEFAULT_SETTLE_S
+    make_backend("fake", settle_s=1.5, switch_address="98:E2:55:00:11:22")  # ignored, not refused

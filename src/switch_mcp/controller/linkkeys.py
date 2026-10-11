@@ -165,7 +165,7 @@ class LinkKeyKeeper:
         """Give the stored keys back to the kernel; returns their addresses.
 
         This replaces the kernel's whole BR/EDR key list. bluetoothd reloads
-        its own keys when it restarts (deploy/bluetooth-session off).
+        its own keys when it restarts (`switch-mcp stop`).
         """
         keys = self.store.all()
         if not keys:
