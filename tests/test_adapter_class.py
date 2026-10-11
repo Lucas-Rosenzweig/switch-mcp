@@ -51,3 +51,18 @@ def test_a_kernel_refusal_is_not_fatal(monkeypatch):
 
     monkeypatch.setattr(adapter_class, "kernel_class", refuse)
     assert adapter_class.claim_gamepad_class() is None
+
+
+def test_a_busy_kernel_is_asked_again(monkeypatch):
+    statuses = [0x0A, 0x0A, 0]
+
+    def mgmt(opcode, index, params=b""):
+        status = statuses.pop(0)
+        if status:
+            raise adapter_class.MgmtError(opcode, status)
+        return b""
+
+    monkeypatch.setattr(adapter_class, "_mgmt", mgmt)
+    monkeypatch.setattr(adapter_class.time, "sleep", lambda seconds: None)
+    adapter_class.set_kernel_class(0x01, 0x04)
+    assert statuses == []

@@ -16,6 +16,12 @@ log = logging.getLogger(__name__)
 _SWITCH_ALIAS = "NINTENDO SWITCH"
 _HANGUPS_BEFORE_REMOVAL = 2
 _HANGUP_POLL_S = 0.1
+# The Switch 2 sometimes hangs up on a controller it knows and accepts it a
+# few seconds later (seen on the console: refused, then accepted on the next
+# attempt with the same key and class). NUXBT gives up after one refusal and
+# waits for a new pairing, which needs someone at the console.
+_RECONNECT_ATTEMPTS = 4
+_RECONNECT_RETRY_S = 3.0
 # Subcommands arrive in bursts when the link comes up and rarely afterwards.
 # The cap keeps a console that repeats one of them from flooding the log.
 _LOGGED_PER_SUBCOMMAND = 20
@@ -136,26 +142,32 @@ def apply() -> None:
 
     # NUXBT only announces itself as a gamepad when pairing. The Switch 2
     # hangs up on a reconnecting device of any other class, so announce it
-    # before reconnecting too, and record the class the attempt went out with.
+    # before reconnecting too, record the class the attempt went out with,
+    # and try again before falling back to pairing.
     original_reconnect = ControllerServer.reconnect
 
     def reconnect(server, reconnect_address):
         index = _adapter_index(server.bt)
-        server.bt.set_class(f"0x{GAMEPAD_CLASS:06x}")
-        time.sleep(0.1)
-        before = read_class(index)
-        if not is_gamepad(before):
-            log.warning("The adapter class is %s, not a gamepad; the console will refuse it", format_class(before))
-        try:
-            sockets = original_reconnect(server, reconnect_address)
-        except OSError as exc:
-            log.info(
-                "Reconnection to %s refused (%s); adapter class was %s before and %s after",
-                reconnect_address, exc, format_class(before), format_class(read_class(index)),
-            )
-            raise
-        log.info("Reconnected to %s with adapter class %s", reconnect_address, format_class(before))
-        return sockets
+        for attempt in range(1, _RECONNECT_ATTEMPTS + 1):
+            server.bt.set_class(f"0x{GAMEPAD_CLASS:06x}")
+            time.sleep(0.1)
+            before = read_class(index)
+            if not is_gamepad(before):
+                log.warning("The adapter class is %s, not a gamepad; the console will refuse it", format_class(before))
+            try:
+                sockets = original_reconnect(server, reconnect_address)
+            except OSError as exc:
+                log.info(
+                    "Reconnection to %s refused, attempt %d of %d (%s); adapter class was %s before and %s after",
+                    reconnect_address, attempt, _RECONNECT_ATTEMPTS, exc,
+                    format_class(before), format_class(read_class(index)),
+                )
+                if attempt == _RECONNECT_ATTEMPTS:
+                    raise
+                time.sleep(_RECONNECT_RETRY_S)
+            else:
+                log.info("Reconnected to %s with adapter class %s", reconnect_address, format_class(before))
+                return sockets
 
     ControllerServer.reconnect = reconnect
 

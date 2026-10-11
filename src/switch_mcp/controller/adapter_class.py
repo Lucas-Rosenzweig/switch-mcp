@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import socket
 import struct
+import time
 
 from .linkkeys import _EV_COMMAND_COMPLETE, _EV_COMMAND_STATUS, _HEADER, _open_mgmt
 
@@ -33,6 +34,14 @@ _INFO_CLASS_OFFSET = 6 + 1 + 2 + 4 + 4
 _HCI_READ_CLASS = 0x0C23
 _HCI_EVENT_PACKET = 0x04
 _HCI_COMMAND_COMPLETE = 0x0E
+_STATUS_BUSY = 0x0A
+_BUSY_ATTEMPTS = 5
+
+
+class MgmtError(OSError):
+    def __init__(self, opcode: int, status: int) -> None:
+        super().__init__(f"Bluetooth management command 0x{opcode:04x} failed (status {status})")
+        self.status = status
 
 
 def is_gamepad(device_class: int | None) -> bool:
@@ -82,7 +91,7 @@ def _mgmt(opcode: int, index: int, params: bytes = b"") -> bytes:
                 continue
             status, returned = reply
             if status != 0:
-                raise OSError(f"Bluetooth management command 0x{opcode:04x} failed (status {status})")
+                raise MgmtError(opcode, status)
             return returned
     finally:
         sock.close()
@@ -98,7 +107,15 @@ def kernel_class(index: int = 0) -> tuple[int, int]:
 
 
 def set_kernel_class(major: int, minor: int, index: int = 0) -> None:
-    _mgmt(_OP_SET_DEVICE_CLASS, index, bytes([major, minor]))
+    for attempt in range(_BUSY_ATTEMPTS):
+        try:
+            _mgmt(_OP_SET_DEVICE_CLASS, index, bytes([major, minor]))
+            return
+        except MgmtError as exc:
+            # The kernel is still writing a previous class or name change.
+            if exc.status != _STATUS_BUSY or attempt == _BUSY_ATTEMPTS - 1:
+                raise
+            time.sleep(0.2)
 
 
 def claim_gamepad_class(index: int = 0) -> tuple[int, int] | None:

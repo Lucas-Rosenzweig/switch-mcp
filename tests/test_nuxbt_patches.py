@@ -105,3 +105,48 @@ def test_patched_protocol_still_answers_and_logs(caplog):
         protocol.process_commands(None)
     assert reply[1] == 0x21 and reply[15] == 0x02  # device info still answered
     assert caplog.text.count("Console subcommand 0x02 device info") == nuxbt_patches._LOGGED_PER_SUBCOMMAND
+
+
+def test_a_refused_reconnection_is_tried_again(monkeypatch):
+    import pytest
+
+    pytest.importorskip("nuxbt.nuxbt")
+    from nuxbt.controller.server import ControllerServer
+
+    nuxbt_patches.apply()
+    monkeypatch.setattr(nuxbt_patches, "read_class", lambda index=0: 0x002508)
+    monkeypatch.setattr(nuxbt_patches.time, "sleep", lambda seconds: None)
+
+    class Adapter:
+        device_id = "hci0"
+        classes = []
+
+        def set_class(self, device_class):
+            self.classes.append(device_class)
+
+    class Server:
+        bt = Adapter()
+        # Stands for the two sockets.connect() NUXBT performs.
+        outcomes = [OSError("refused"), OSError("refused"), ("itr", "ctrl")]
+
+    def original(server, address):
+        outcome = server.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    # The patch closed over NUXBT's own reconnect; reach it through its cell.
+    cell = next(c for c in ControllerServer.reconnect.__closure__ if callable(c.cell_contents)
+                and c.cell_contents.__name__ == "reconnect")
+    real = cell.cell_contents
+    cell.cell_contents = original
+    try:
+        assert ControllerServer.reconnect(Server(), "AA:BB:CC:DD:EE:FF") == ("itr", "ctrl")
+        assert Adapter.classes == ["0x002508"] * 3  # announced again before each attempt
+
+        Server.outcomes = [OSError("refused")] * nuxbt_patches._RECONNECT_ATTEMPTS
+        with pytest.raises(OSError):
+            ControllerServer.reconnect(Server(), "AA:BB:CC:DD:EE:FF")
+        assert Server.outcomes == []
+    finally:
+        cell.cell_contents = real
