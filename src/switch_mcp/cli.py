@@ -7,6 +7,7 @@
     switch-mcp bt on|off|status
                               switch bluetoothd in and out of emulation mode by hand
     switch-mcp config         show the effective configuration
+    switch-mcp selftest       acceptance test on the real console, through the running server
 """
 from __future__ import annotations
 
@@ -169,6 +170,12 @@ def build_parser() -> argparse.ArgumentParser:
     bt = commands.add_parser("bt", help="bluetoothd emulation mode by hand (asks for sudo)")
     bt.add_argument("mode", choices=["on", "off", "status"])
     bt.set_defaults(func=cmd_bt)
+
+    from . import selftest
+
+    check = commands.add_parser("selftest", help="acceptance test on the real console (server must be running)")
+    selftest.add_arguments(check)
+    check.set_defaults(func=selftest.run)
 
     config = commands.add_parser("config", help="show the effective configuration")
     config.add_argument("--url", action="store_true", help="print only the MCP address")
