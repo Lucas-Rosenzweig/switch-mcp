@@ -21,44 +21,47 @@ agent IA ──MCP──> switch_mcp.server
 ## Installation
 
 ```fish
-uv sync --extra bluetooth
+./install.sh
 ```
 
-Sans `--extra bluetooth`, seuls le faux backend et la capture sont disponibles.
+Le script, à relancer après chaque mise à jour, demande le mot de passe `sudo`
+une seule fois. Il installe l'environnement Python (`uv sync --extra bluetooth`),
+la commande `switch-mcp` dans `~/.local/bin`, le service systemd
+`switch-mcp.service` (non lancé au démarrage du PC), une règle polkit qui permet
+de le démarrer et l'arrêter sans mot de passe, un fichier de configuration
+`~/.config/switch-mcp/config.toml` et le serveur MCP `switch` dans Claude Code
+(niveau utilisateur). `./install.sh --uninstall` retire tout cela, sauf la
+configuration et la clé d'appairage.
 
 ## Essai sans matériel
 
 ```fish
+uv sync
 uv run pytest
-SWITCH_MCP_BACKEND=fake uv run switch-mcp
+SWITCH_MCP_BACKEND=fake uv run switch-mcp serve
 ```
 
 ## Session avec la Switch
 
-L'émulation Bluetooth a deux prérequis système.
-
-1. **`bluetoothd` sans ses plugins**, sinon il occupe les ports HID. Pendant ce
-   mode, les autres appareils Bluetooth du PC (casque, manette) ne fonctionnent
-   pas. Le réglage est dans `/run` : un redémarrage du PC le retire aussi.
-
-   ```fish
-   deploy/bluetooth-session on
-   ```
-
-2. **Trois capacités réseau** pour le serveur (`CAP_NET_RAW`, `CAP_NET_ADMIN`,
-   `CAP_NET_BIND_SERVICE`). Le script ci-dessous le lance sous ton utilisateur
-   avec uniquement ces capacités, sans root :
-
-   ```fish
-   deploy/run-with-caps
-   ```
-
-Le serveur écoute alors sur `http://127.0.0.1:8765/mcp`. Pour le déclarer dans
-Claude Code :
-
 ```fish
-claude mcp add --transport http switch http://127.0.0.1:8765/mcp
+switch-mcp start     # bascule le Bluetooth en mode émulation et lance le serveur
+switch-mcp stop      # arrête le serveur et rétablit le Bluetooth normal
+switch-mcp status    # état du service, mode Bluetooth, adresse MCP
+switch-mcp doctor    # vérifie adaptateur, BlueZ, service, carte de capture, signal HDMI, clé, Claude Code
 ```
+
+Pendant une session, `bluetoothd` tourne sans ses plugins pour libérer les ports
+HID : les autres appareils Bluetooth du PC (casque, manette) ne fonctionnent pas.
+Le serveur tourne sous ton utilisateur avec seulement trois capacités réseau
+(`CAP_NET_ADMIN`, `CAP_NET_RAW`, et `CAP_NET_BIND_SERVICE` pour les ports L2CAP
+HID 17 et 19). Le basculement du Bluetooth est fait, en root, par
+`/usr/local/libexec/switch-mcp/bluetooth-mode`, copie non modifiable par
+l'utilisateur de `deploy/bluetooth-mode`. `switch-mcp bt on|off` le fait à la
+main en cas de besoin.
+
+Le serveur écoute alors sur `http://127.0.0.1:8765/mcp`, déjà déclaré dans Claude
+Code par `install.sh`. En développement, `touch .reload` relance le serveur avec
+le code courant sans repasser par le Bluetooth normal.
 
 Premier appairage : sur la Switch, ouvrir *Manettes > Changer le style/l'ordre*,
 puis appeler `switch_connect` et interroger `switch_status` jusqu'à `connected`.
@@ -80,13 +83,8 @@ Si ce fichier est perdu, la console refusera l'appairage : il faut alors faire
 *Paramètres de la console > Manettes et accessoires > Déconnecter les manettes*
 sur la Switch, puis appairer à nouveau.
 
-Le journal du serveur est dans `~/.local/state/switch-mcp/server.log`.
-
-Fin de session :
-
-```fish
-deploy/bluetooth-session off
-```
+Le journal du serveur est dans `~/.local/state/switch-mcp/server.log`, et aussi
+dans `journalctl -u switch-mcp`.
 
 ## Regarder l'écran pendant que l'agent joue
 
@@ -117,15 +115,24 @@ pour renvoyer l'image résultante dans le même appel.
 
 ## Configuration
 
-| Variable | Défaut | Rôle |
+`~/.config/switch-mcp/config.toml` (modèle commenté : `deploy/config.example.toml`).
+Chaque réglage peut être surchargé par une variable d'environnement
+`SWITCH_MCP_<NOM>` ; `SWITCH_MCP_CONFIG` désigne un autre fichier.
+`switch-mcp config` affiche les valeurs en vigueur.
+
+| Réglage | Défaut | Rôle |
 | --- | --- | --- |
-| `SWITCH_MCP_BACKEND` | `nuxbt` | `nuxbt` ou `fake` |
-| `SWITCH_MCP_VIDEO_DEVICE` | `/dev/video0` | Périphérique de capture |
-| `SWITCH_MCP_CAPTURE_IDLE_S` | `30` | Inactivité avant de relâcher la capture |
-| `SWITCH_MCP_DEFAULT_HOLD_S` | `5` | Durée d'un maintien sans durée précisée |
-| `SWITCH_MCP_MAX_HOLD_S` | `30` | Durée maximale d'un maintien |
-| `SWITCH_MCP_NUXBT_DEBUG` | `0` | `1` journalise chaque message échangé avec la console |
-| `SWITCH_MCP_HOST` / `SWITCH_MCP_PORT` | `127.0.0.1` / `8765` | Écoute en mode HTTP |
+| `backend` | `nuxbt` | `nuxbt` ou `fake` |
+| `video_device` | `/dev/video0` | Périphérique de capture |
+| `capture_idle_s` | `30` | Inactivité avant de relâcher la capture |
+| `screenshot_width` | `1280` | Largeur d'une capture par défaut |
+| `default_hold_s` | `5` | Durée d'un maintien sans durée précisée |
+| `max_hold_s` | `30` | Durée maximale d'un maintien |
+| `settle_s` | `3` | Délai après connexion avant d'accepter les entrées |
+| `switch_address` | (vide) | Console à reconnecter ; apprise à l'appairage |
+| `host` / `port` | `127.0.0.1` / `8765` | Écoute du serveur MCP |
+
+`SWITCH_MCP_NUXBT_DEBUG=1` journalise chaque message échangé avec la console.
 
 ## Limites connues
 
@@ -136,7 +143,7 @@ pour renvoyer l'image résultante dans le même appel.
   reconnexion, flux coupé au relâchement). Une mise à jour de NUXBT peut les
   rendre caducs : la version est bornée dans `pyproject.toml`.
 - Rendre les clés au noyau remplace sa liste de clés Bluetooth classiques ;
-  `deploy/bluetooth-session off` rétablit celles des autres appareils.
+  `switch-mcp stop` rétablit celles des autres appareils.
 - Le premier flux vidéo après un changement de signal HDMI sort avec de fausses
   couleurs (défaut du pilote `sc0710`). Le serveur le contourne à l'ouverture,
   mais pas si le signal change pendant qu'une capture est en cours.

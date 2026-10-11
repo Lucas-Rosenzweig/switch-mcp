@@ -1,0 +1,27 @@
+# switch-mcp configuration: ~/.config/switch-mcp/config.toml
+# Every setting is optional. A SWITCH_MCP_<NAME> environment variable
+# overrides the line below it (SWITCH_MCP_PORT=9000, ...).
+# `switch-mcp config` shows the values in use.
+
+# "nuxbt" drives the console over Bluetooth, "fake" only records inputs.
+# backend = "nuxbt"
+
+# Capture card.
+# video_device = "/dev/video0"
+# Seconds without a screenshot before the card is released for other programs.
+# capture_idle_s = 30.0
+# Width in pixels of a default screenshot.
+# screenshot_width = 1280
+
+# A held button or stick is released after this many seconds unless renewed.
+# default_hold_s = 5.0
+# max_hold_s = 30.0
+# Seconds after the link comes up during which inputs are still refused.
+# settle_s = 3.0
+
+# Console to reconnect to. Learnt at pairing: set it only to force one.
+# switch_address = "AA:BB:CC:DD:EE:FF"
+
+# Where the MCP server listens. Keep 127.0.0.1: it has no authentication.
+# host = "127.0.0.1"
+# port = 8765

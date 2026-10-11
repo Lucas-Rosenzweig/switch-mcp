@@ -215,22 +215,22 @@ def _exit_when_touched(path: Path, pad: Pad, backend) -> None:
                 os._exit(RELOAD_EXIT_STATUS)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="switch-mcp serve", description=__doc__)
     parser.add_argument(
-        "--transport", choices=["stdio", "streamable-http"], default="stdio",
+        "--transport", choices=["stdio", "streamable-http"], default="streamable-http",
         help="stdio for a client that launches the server, streamable-http for a long-running service",
     )
     parser.add_argument(
         "--reload-file", metavar="PATH",
         help="exit with status 75 when PATH is touched, so a wrapper can restart the server (development)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     # stdout carries the MCP protocol in stdio mode; logging goes to stderr.
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     _log_to_file()
 
-    config = Config.from_env()
+    config = Config.load()
     backend = make_backend(config.backend)
     if hasattr(backend, "start"):
         try:

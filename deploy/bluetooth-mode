@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Switch bluetoothd in and out of controller emulation mode. Run as root.
+#
+#   on      restart bluetoothd without its plugins, so the HID ports are free
+#   off     restore the normal bluetoothd
+#   status  show which mode is active
+#
+# switch-mcp.service runs it before starting and after stopping. install.sh
+# copies it to /usr/local/libexec/switch-mcp/, root-owned: the user may start
+# the service without a password, so the service must not run as root a file
+# the user can edit.
+#
+# While "on", other Bluetooth devices of this PC (headsets, gamepads) do not
+# work. The override lives in /run, so a reboot also restores normal mode.
+set -euo pipefail
+
+override=/run/systemd/system/bluetooth.service.d/switch-mcp.conf
+
+restart_bluetoothd() {
+    systemctl daemon-reload
+    systemctl restart "$@" bluetooth.service
+}
+
+case "${1:-status}" in
+on)
+    fragment=$(systemctl show -P FragmentPath bluetooth.service)
+    exec_start=$(grep -m1 '^ExecStart=' "$fragment")
+    wanted=$(printf '[Service]\nExecStart=\n%s --compat --noplugin=*\n' "$exec_start")
+    # Already on: keep bluetoothd as it is, so a restart of the server does
+    # not drop the console's link.
+    if [[ -f $override && $(<"$override") == "$wanted" ]] && systemctl is-active --quiet bluetooth.service; then
+        echo "Controller emulation mode is already on."
+        exit 0
+    fi
+    mkdir -p "$(dirname "$override")"
+    printf '%s\n' "$wanted" >"$override"
+    restart_bluetoothd
+    echo "Controller emulation mode is on."
+    ;;
+off)
+    # The server asked to be restarted (status 75, development reload):
+    # stay in emulation mode for the next run.
+    if [[ ${EXIT_STATUS:-} == 75 ]]; then
+        exit 0
+    fi
+    if [[ ! -f $override ]]; then
+        echo "Bluetooth is already normal."
+        exit 0
+    fi
+    rm -f "$override"
+    # Run from switch-mcp.service's ExecStopPost, which bluetooth.service's
+    # stop waits for (the unit is ordered After= it): waiting for the restart
+    # here would deadlock until the stop timeout.
+    restart_bluetoothd --no-block
+    echo "Bluetooth is back to normal."
+    ;;
+status)
+    if [[ -f $override ]]; then echo "on"; else echo "off"; fi
+    ;;
+*)
+    echo "usage: $0 on|off|status" >&2
+    exit 2
+    ;;
+esac
