@@ -14,7 +14,7 @@ dependencies = [
 bluetooth = ["nuxbt>=3.3.7,<3.4"]
 
 [project.scripts]
-switch-mcp = "switch_mcp.server:main"
+switch-mcp = "switch_mcp.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]
